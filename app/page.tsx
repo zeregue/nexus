@@ -14,6 +14,7 @@ import {
   FolderTree,
   LayoutDashboard,
   MoreHorizontal,
+  MessageCircle,
   Package,
   Plus,
   Search,
@@ -50,7 +51,11 @@ export default function Page() {
   const [importKind, setImportKind] = useState<'estrutura' | 'produtos'>('estrutura')
   const [products, setProducts] = useState<Product[]>(initialProducts)
   const [importSummary, setImportSummary] = useState<string | null>(null)
+  const [structureRows, setStructureRows] = useState<Array<{ group: string; count: number; subgroups: string[] }>>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatMessages, setChatMessages] = useState([{ role: 'assistant', text: 'Posso revisar a importação, localizar itens sem NCM ou sugerir correções na estrutura.' }])
 
+  const visibleStructureRows = structureRows.length ? structureRows : Array.from(new Map(products.map((product) => [product.group, { group: product.group, count: products.filter((item) => item.group === product.group).length, subgroups: Array.from(new Set(products.filter((item) => item.group === product.group).map((item) => item.subgroup).filter((item) => item !== '—'))) }])).values())
   const filteredProducts = products.filter((product) =>
     product.name.toLowerCase().includes(search.toLowerCase()) || product.group.toLowerCase().includes(search.toLowerCase()),
   )
@@ -76,34 +81,63 @@ export default function Page() {
     return key ? String(row[key] ?? '').trim() : ''
   }
 
+  function sendChatMessage() {
+    const message = chatInput.trim()
+    if (!message) return
+    const lower = message.toLowerCase()
+    const response = lower.includes('ncm') || lower.includes('cest')
+      ? `${products.filter((product) => product.ncm === '—' || product.cest === '—').length} item(ns) ainda precisam de dados fiscais.`
+      : lower.includes('grupo') || lower.includes('subgrupo')
+        ? `Encontrei ${visibleStructureRows.length} grupo(s) na segunda aba. Os subgrupos foram promovidos para grupos.`
+        : 'Posso ajudar a revisar grupos, produtos, códigos de barras, NCM e CEST/SEST.'
+    setChatMessages((messages) => [...messages, { role: 'user', text: message }, { role: 'assistant', text: response }])
+    setChatInput('')
+  }
+
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
     setSelectedFile(file.name)
     const buffer = await file.arrayBuffer()
-    const workbook = XLSX.read(buffer, { type: 'array' })
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[workbook.SheetNames[0]], { defval: '' })
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+    const secondSheet = workbook.Sheets[workbook.SheetNames[1]]
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: '' })
+    const secondRows = secondSheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(secondSheet, { defval: '' }) : []
 
     if (importKind === 'estrutura') {
-      const organized = rows.map((row, index) => {
-        const primary = firstValue(row, ['grupo', 'grupo principal', 'categoria', 'departamento']) || `Grupo ${index + 1}`
-        const subgroup = firstValue(row, ['subgrupo', 'subgrupo principal', 'familia', 'subcategoria'])
-        return { name: primary, code: '—', group: 'Itens principais', subgroup: subgroup || 'Sem subgrupo', ncm: '—', cest: '—', status: 'revisar' }
-      })
-      setProducts(Array.from(new Map(organized.map((item) => [`${item.name}-${item.subgroup}`, item])).values()))
-      setImportSummary(`${organized.length} linhas organizadas: grupos primários viraram itens e subgrupos foram convertidos em grupos.`)
+      const organized = rows.map((row, index) => ({
+        name: firstValue(row, ['item principal', 'grupo', 'grupo principal', 'categoria', 'departamento']) || `Item principal ${index + 1}`,
+        code: firstValue(row, ['codigo', 'codigo do item']) || '—',
+        group: 'Itens principais',
+        subgroup: '—',
+        ncm: '—',
+        cest: '—',
+        status: 'revisar',
+      }))
+      const promotedGroups = secondRows.map((row, index) => ({
+        group: firstValue(row, ['subgrupo', 'grupos', 'grupo', 'categoria']) || `Grupo ${index + 1}`,
+        count: 0,
+        subgroups: [],
+      }))
+      setProducts(organized)
+      setStructureRows(Array.from(new Map(promotedGroups.map((item) => [item.group, item])).values()))
+      setImportSummary(`${organized.length} itens principais e ${promotedGroups.length} subgrupos convertidos em grupos na segunda aba.`)
     } else {
-      const merged = rows.map((row) => ({
+      const productSheet = workbook.Sheets['Itens principais'] || firstSheet
+      const productRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(productSheet, { defval: '' })
+      const merged = productRows.map((row) => ({
         name: firstValue(row, ['produto', 'descricao', 'descricao do produto', 'item']) || 'Produto sem descrição',
-        code: firstValue(row, ['ean', 'gtin', 'codigo de barras', 'codigo', 'cod barras']) || '—',
-        group: firstValue(row, ['grupo', 'categoria', 'departamento']) || 'Sem grupo',
-        subgroup: firstValue(row, ['subgrupo', 'familia', 'subcategoria']) || 'Sem subgrupo',
+        code: firstValue(row, ['ean', 'gtin', 'codigo de barras', 'codigo do produto', 'codigo', 'cod barras']) || '—',
+        group: firstValue(row, ['item principal', 'grupo', 'categoria', 'departamento']) || 'Sem grupo',
+        subgroup: firstValue(row, ['subgrupo', 'subgrupo / categoria', 'familia', 'subcategoria']) || 'Sem subgrupo',
         ncm: firstValue(row, ['ncm', 'ncm fiscal']) || '—',
         cest: firstValue(row, ['cest', 'sest']) || '—',
         status: 'validado',
       }))
       setProducts(merged)
-      setImportSummary(`${merged.length} produtos importados com código de barras, NCM e CEST/SEST.`)
+      setStructureRows([])
+      setImportSummary(`${merged.length} produtos adicionados na ordem da planilha, com código de barras, NCM e CEST/SEST.`)
     }
     setToast(true)
     window.setTimeout(() => setToast(false), 2800)
@@ -138,6 +172,13 @@ export default function Page() {
             <div className="space-y-5"><div className="rounded-xl border border-[#e3e7eb] bg-white p-5 shadow-[0_2px_8px_rgba(20,33,48,0.025)]"><div className="mb-4 flex items-center justify-between"><div><h2 className="text-[14px] font-bold text-[#243142]">Estrutura atual</h2><p className="mt-1 text-[11px] text-[#929ba7]">Distribuição por grupo principal</p></div><FolderTree size={17} className="text-[#75a497]" /></div><div className="space-y-3">{[['Alimentos', 76, 'bg-[#5f9f8a]'], ['Bebidas', 58, 'bg-[#82b5a6]'], ['Doces', 44, 'bg-[#b49a72]'], ['Salgados', 38, 'bg-[#d2ad75]'], ['Padaria', 32, 'bg-[#d9c49f]']].map(([name, value, color]) => <div key={String(name)}><div className="mb-1.5 flex justify-between text-[11px]"><span className="font-medium text-[#596675]">{name}</span><span className="text-[#939ca7]">{value}</span></div><div className="h-1.5 rounded-full bg-[#edf0f1]"><div className={`h-1.5 rounded-full ${color}`} style={{ width: `${(Number(value) / 76) * 100}%` }} /></div></div>)}</div><button className="mt-5 w-full rounded-lg border border-[#e3e8e7] py-2 text-[11px] font-semibold text-[#377563] hover:bg-[#f4faf7]">Gerenciar grupos <ArrowRight className="ml-1 inline" size={12} /></button></div><div className="rounded-xl border border-[#f3dfc5] bg-[#fffbf5] p-5"><div className="mb-3 flex items-center gap-2 text-[12px] font-bold text-[#95612b]"><AlertCircle size={16} />Atenção necessária</div><p className="text-[11px] leading-[1.55] text-[#997959]">12 produtos estão sem NCM ou CEST. Revise os itens antes de exportar para evitar inconsistências fiscais.</p><button className="mt-3 text-[11px] font-bold text-[#b56b28]">Revisar agora <ArrowRight className="ml-1 inline" size={12} /></button></div></div>
           </div>
         </div>
+        <section className="mx-auto max-w-[1360px] px-5 pb-8 sm:px-8">
+          <div className="rounded-xl border border-[#e3e7eb] bg-white shadow-[0_2px_8px_rgba(20,33,48,0.025)]">
+            <div className="flex items-center justify-between border-b border-[#eef0f3] px-5 py-4"><div><h2 className="text-[15px] font-bold text-[#243142]">Grupos e subgrupos</h2><p className="mt-1 text-xs text-[#929ba7]">Segunda aba: os subgrupos importados foram promovidos a grupos.</p></div><FolderTree size={17} className="text-[#75a497]" /></div>
+            <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-left"><thead><tr className="border-b border-[#eef0f3] text-[10px] font-bold uppercase tracking-[0.08em] text-[#a0a8b3]"><th className="px-5 py-3">Grupo</th><th className="py-3">Itens</th><th className="py-3">Subgrupos encontrados</th></tr></thead><tbody>{visibleStructureRows.map((row) => <tr key={row.group} className="border-b border-[#f0f2f4] last:border-0"><td className="px-5 py-3 text-xs font-semibold text-[#2c3847]">{row.group}</td><td className="py-3 text-xs text-[#596675]">{row.count}</td><td className="py-3 text-xs text-[#596675]">{row.subgroups.length ? row.subgroups.join(', ') : 'Sem subgrupo'}</td></tr>)}</tbody></table></div>
+          </div>
+          <div className="mt-5 rounded-xl border border-[#dce9e4] bg-[#f8fcfa] p-5"><div className="mb-3 flex items-center gap-2 text-sm font-bold text-[#245d4e]"><MessageCircle size={17} />Assistente da planilha</div><div className="max-h-44 space-y-2 overflow-y-auto rounded-lg bg-white p-3">{chatMessages.map((message, index) => <div key={`${message.role}-${index}`} className={`max-w-[88%] rounded-lg px-3 py-2 text-xs ${message.role === 'user' ? 'ml-auto bg-[#1c6b5a] text-white' : 'bg-[#edf6f2] text-[#3e6156]'}`}>{message.text}</div>)}</div><div className="mt-3 flex gap-2"><input aria-label="Mensagem para o assistente" value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.keyCode !== 229) sendChatMessage() }} placeholder="Pergunte sobre os itens importados..." className="h-10 flex-1 rounded-lg border border-[#dce5e1] bg-white px-3 text-xs outline-none focus:border-[#74aa9b]" /><button aria-label="Enviar mensagem" onClick={sendChatMessage} className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#1c6b5a] text-white hover:bg-[#155746]"><ArrowRight size={16} /></button></div></div>
+        </section>
       </section>
       {showUpload && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#13251f]/35 px-4"><div className="w-full max-w-[470px] rounded-2xl bg-white p-6 shadow-2xl"><div className="mb-5 flex items-start justify-between"><div><h2 className="text-lg font-bold text-[#243142]">Importar planilha</h2><p className="mt-1 text-xs text-[#87919d]">Escolha a etapa e envie sua planilha Excel.</p></div><button aria-label="Fechar" onClick={() => setShowUpload(false)} className="text-[#9aa3ae] hover:text-[#435160]"><X size={18} /></button></div><div className="mb-4 grid grid-cols-2 gap-2"><button onClick={() => setImportKind('estrutura')} className={`rounded-lg border px-3 py-2 text-left text-[11px] font-semibold ${importKind === 'estrutura' ? 'border-[#8fc1b0] bg-[#edf8f3] text-[#236b57]' : 'border-[#e3e7eb] text-[#7f8997]'}`}>1. Estrutura<span className="mt-1 block text-[10px] font-normal opacity-75">Grupos e subgrupos</span></button><button onClick={() => setImportKind('produtos')} className={`rounded-lg border px-3 py-2 text-left text-[11px] font-semibold ${importKind === 'produtos' ? 'border-[#8fc1b0] bg-[#edf8f3] text-[#236b57]' : 'border-[#e3e7eb] text-[#7f8997]'}`}>2. Produtos<span className="mt-1 block text-[10px] font-normal opacity-75">EAN, NCM e CEST</span></button></div><div className="rounded-xl border-2 border-dashed border-[#b9d6cc] bg-[#f7fcfa] px-6 py-9 text-center"><div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#e4f3ed] text-[#2f806b]"><FileSpreadsheet size={22} /></div><p className="text-sm font-semibold text-[#385348]">Arraste seu arquivo aqui</p><p className="mt-1 text-xs text-[#96a59f]">ou selecione um arquivo .xlsx ou .xls</p><label className="mt-4 inline-flex cursor-pointer rounded-lg bg-[#1c6b5a] px-4 py-2 text-xs font-semibold text-white hover:bg-[#155746]">Selecionar arquivo<input className="sr-only" type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} /></label>{selectedFile && <p className="mt-3 text-xs font-medium text-[#2f806b]">Arquivo selecionado: {selectedFile}</p>}</div><div className="mt-5 flex items-start gap-2 text-[11px] leading-[1.5] text-[#86908e]"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#5f9c8a]" />Seus dados são processados com segurança e os códigos fiscais originais nunca são inventados.</div></div></div>}
       {toast && <div role="status" className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-lg bg-[#183d33] px-4 py-3 text-xs font-semibold text-white shadow-xl"><Check size={15} />Exportação preparada com sucesso</div>}
