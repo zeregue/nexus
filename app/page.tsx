@@ -43,6 +43,7 @@ export default function Page() {
   const [activeTab, setActiveTab] = useState('Produtos')
   const [search, setSearch] = useState('')
   const [showUpload, setShowUpload] = useState(false)
+  const [importMode, setImportMode] = useState<'products' | 'groups'>('products')
   const [toast, setToast] = useState('')
   const [products, setProducts] = useState(initialProducts)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -74,10 +75,10 @@ export default function Page() {
         const sheet = workbook.Sheets[workbook.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
         const imported = rows.map((row, index) => ({
-          name: String(row.Produto ?? row.produto ?? row.Nome ?? row.nome ?? `Produto ${index + 1}`),
+          name: String(row.Produto ?? row.produto ?? row.Item ?? row.item ?? row.Nome ?? row.nome ?? `Produto ${index + 1}`),
           code: String(row.EAN ?? row.GTIN ?? row.Código ?? row.codigo ?? '—'),
-          group: String(row.Grupo ?? row.grupo ?? 'Sem grupo'),
-          subgroup: String(row.Subgrupo ?? row.subgrupo ?? 'Sem subgrupo'),
+          group: String(row['Grupo principal'] ?? row['Grupo Principal'] ?? row.Grupo ?? row.grupo ?? 'Sem grupo'),
+          subgroup: String(row.Subgrupo ?? row.subgrupo ?? row['Subgrupo principal'] ?? row['Subgrupo Principal'] ?? 'Sem subgrupo'),
           ncm: String(row.NCM ?? row.ncm ?? '—'),
           cest: String(row.CEST ?? row.cest ?? '—'),
           status: row.NCM || row.ncm ? 'validado' : 'revisar',
@@ -122,7 +123,7 @@ export default function Page() {
           </div>
         </div>
       </section>
-      {showUpload && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#13251f]/35 px-4"><div className="w-full max-w-[470px] rounded-2xl bg-white p-6 shadow-2xl"><div className="mb-5 flex items-start justify-between"><div><h2 className="text-lg font-bold text-[#243142]">Importar planilha</h2><p className="mt-1 text-xs text-[#87919d]">Envie um arquivo Excel para começar a organização.</p></div><button aria-label="Fechar" onClick={() => setShowUpload(false)} className="text-[#9aa3ae] hover:text-[#435160]"><X size={18} /></button></div><div onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); handleFile(event.dataTransfer.files[0]) }} className="rounded-xl border-2 border-dashed border-[#b9d6cc] bg-[#f7fcfa] px-6 py-9 text-center"><div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#e4f3ed] text-[#2f806b]"><FileSpreadsheet size={22} /></div><p className="text-sm font-semibold text-[#385348]">Arraste seu arquivo aqui</p><p className="mt-1 text-xs text-[#96a59f]">ou selecione um arquivo .xlsx ou .xls</p><input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => handleFile(event.target.files?.[0])} /><button onClick={() => fileInputRef.current?.click()} className="mt-4 rounded-lg bg-[#1c6b5a] px-4 py-2 text-xs font-semibold text-white">Selecionar arquivo</button></div><div className="mt-5 flex items-start gap-2 text-[11px] leading-[1.5] text-[#86908e]"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#5f9c8a]" />Seus dados são processados com segurança e os códigos fiscais originais nunca são inventados.</div></div></div>}
+      {showUpload && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#13251f]/35 px-4"><div className="w-full max-w-[470px] rounded-2xl bg-white p-6 shadow-2xl"><div className="mb-5 flex items-start justify-between"><div><h2 className="text-lg font-bold text-[#243142]">Importar planilha</h2><p className="mt-1 text-xs text-[#87919d]">Envie um arquivo Excel para começar a organização.</p></div><button aria-label="Fechar" onClick={() => setShowUpload(false)} className="text-[#9aa3ae] hover:text-[#435160]"><X size={18} /></button></div><div className="mb-4 rounded-lg border border-[#e5ebe8] bg-[#fbfdfc] p-1"><div className="grid grid-cols-2 gap-1"><button type="button" onClick={() => setImportMode('products')} className={`rounded-md px-3 py-2 text-[11px] font-semibold transition ${importMode === 'products' ? 'bg-white text-[#1c6b5a] shadow-sm' : 'text-[#84918c]'}`}>Produtos</button><button type="button" onClick={() => setImportMode('groups')} className={`rounded-md px-3 py-2 text-[11px] font-semibold transition ${importMode === 'groups' ? 'bg-white text-[#1c6b5a] shadow-sm' : 'text-[#84918c]'}`}>Itens principais e grupos</button></div></div><p className="mb-3 text-[11px] leading-[1.45] text-[#87938e]">{importMode === 'groups' ? 'Use as colunas Grupo principal e Subgrupo para cadastrar a estrutura da loja.' : 'Use as colunas Produto, Grupo, Subgrupo, NCM e EAN para importar seus itens.'}</p><div onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); handleFile(event.dataTransfer.files[0]) }} className="rounded-xl border-2 border-dashed border-[#b9d6cc] bg-[#f7fcfa] px-6 py-9 text-center"><div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#e4f3ed] text-[#2f806b]"><FileSpreadsheet size={22} /></div><p className="text-sm font-semibold text-[#385348]">Arraste seu arquivo aqui</p><p className="mt-1 text-xs text-[#96a59f]">ou selecione um arquivo .xlsx ou .xls</p><input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => handleFile(event.target.files?.[0])} /><button onClick={() => fileInputRef.current?.click()} className="mt-4 rounded-lg bg-[#1c6b5a] px-4 py-2 text-xs font-semibold text-white">Selecionar arquivo</button></div><div className="mt-5 flex items-start gap-2 text-[11px] leading-[1.5] text-[#86908e]"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#5f9c8a]" />Seus dados são processados com segurança e os códigos fiscais originais nunca são inventados.</div></div></div>}
       {toast && <div role="status" className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-lg bg-[#183d33] px-4 py-3 text-xs font-semibold text-white shadow-xl"><Check size={15} />{toast}</div>}
     </main>
   )
