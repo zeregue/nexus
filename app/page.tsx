@@ -43,14 +43,31 @@ export default function Page() {
   const [search, setSearch] = useState('')
   const [showUpload, setShowUpload] = useState(false)
   const [toast, setToast] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
 
   const filteredProducts = products.filter((product) =>
     product.name.toLowerCase().includes(search.toLowerCase()) || product.group.toLowerCase().includes(search.toLowerCase()),
   )
 
   function handleExport() {
+    const header = ['Produto', 'Grupo', 'Subgrupo', 'NCM', 'EAN / GTIN', 'CEST', 'Status']
+    const rows = filteredProducts.map((product) => [product.name, product.group, product.subgroup, product.ncm, product.code, product.cest, product.status])
+    const csv = [header, ...rows].map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(';')).join('\n')
+    const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'produtos-organizados.csv'
+    link.click()
+    URL.revokeObjectURL(url)
     setToast(true)
     window.setTimeout(() => setToast(false), 2800)
+  }
+
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setSelectedFile(file.name)
   }
 
   return (
@@ -83,7 +100,7 @@ export default function Page() {
           </div>
         </div>
       </section>
-      {showUpload && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#13251f]/35 px-4"><div className="w-full max-w-[470px] rounded-2xl bg-white p-6 shadow-2xl"><div className="mb-5 flex items-start justify-between"><div><h2 className="text-lg font-bold text-[#243142]">Importar planilha</h2><p className="mt-1 text-xs text-[#87919d]">Envie um arquivo Excel para começar a organização.</p></div><button aria-label="Fechar" onClick={() => setShowUpload(false)} className="text-[#9aa3ae] hover:text-[#435160]"><X size={18} /></button></div><div className="rounded-xl border-2 border-dashed border-[#b9d6cc] bg-[#f7fcfa] px-6 py-9 text-center"><div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#e4f3ed] text-[#2f806b]"><FileSpreadsheet size={22} /></div><p className="text-sm font-semibold text-[#385348]">Arraste seu arquivo aqui</p><p className="mt-1 text-xs text-[#96a59f]">ou selecione um arquivo .xlsx ou .xls</p><button className="mt-4 rounded-lg bg-[#1c6b5a] px-4 py-2 text-xs font-semibold text-white">Selecionar arquivo</button></div><div className="mt-5 flex items-start gap-2 text-[11px] leading-[1.5] text-[#86908e]"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#5f9c8a]" />Seus dados são processados com segurança e os códigos fiscais originais nunca são inventados.</div></div></div>}
+      {showUpload && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#13251f]/35 px-4"><div className="w-full max-w-[470px] rounded-2xl bg-white p-6 shadow-2xl"><div className="mb-5 flex items-start justify-between"><div><h2 className="text-lg font-bold text-[#243142]">Importar planilha</h2><p className="mt-1 text-xs text-[#87919d]">Envie um arquivo Excel para começar a organização.</p></div><button aria-label="Fechar" onClick={() => setShowUpload(false)} className="text-[#9aa3ae] hover:text-[#435160]"><X size={18} /></button></div><div className="rounded-xl border-2 border-dashed border-[#b9d6cc] bg-[#f7fcfa] px-6 py-9 text-center"><div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#e4f3ed] text-[#2f806b]"><FileSpreadsheet size={22} /></div><p className="text-sm font-semibold text-[#385348]">Arraste seu arquivo aqui</p><p className="mt-1 text-xs text-[#96a59f]">ou selecione um arquivo .xlsx ou .xls</p><label className="mt-4 inline-flex cursor-pointer rounded-lg bg-[#1c6b5a] px-4 py-2 text-xs font-semibold text-white hover:bg-[#155746]">Selecionar arquivo<input className="sr-only" type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} /></label>{selectedFile && <p className="mt-3 text-xs font-medium text-[#2f806b]">Arquivo selecionado: {selectedFile}</p>}</div><div className="mt-5 flex items-start gap-2 text-[11px] leading-[1.5] text-[#86908e]"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#5f9c8a]" />Seus dados são processados com segurança e os códigos fiscais originais nunca são inventados.</div></div></div>}
       {toast && <div role="status" className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-lg bg-[#183d33] px-4 py-3 text-xs font-semibold text-white shadow-xl"><Check size={15} />Exportação preparada com sucesso</div>}
     </main>
   )
