@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import * as XLSX from 'xlsx'
 import {
   AlertCircle,
   ArrowRight,
@@ -23,7 +24,9 @@ import {
   X,
 } from 'lucide-react'
 
-const products = [
+type Product = { name: string; code: string; group: string; subgroup: string; ncm: string; cest: string; status: string }
+
+const initialProducts: Product[] = [
   { name: 'Pão francês', code: '7891000100015', group: 'Padaria', subgroup: 'Pães', ncm: '1905.90.90', cest: '—', status: 'validado' },
   { name: 'Coca-Cola lata 350ml', code: '7894900011517', group: 'Bebidas', subgroup: 'Refrigerantes', ncm: '2202.10.00', cest: '03.007.00', status: 'validado' },
   { name: 'Coxinha de frango', code: '—', group: 'Salgados', subgroup: 'Fritos', ncm: '—', cest: '—', status: 'revisar' },
@@ -44,6 +47,9 @@ export default function Page() {
   const [showUpload, setShowUpload] = useState(false)
   const [toast, setToast] = useState(false)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [importKind, setImportKind] = useState<'estrutura' | 'produtos'>('estrutura')
+  const [products, setProducts] = useState<Product[]>(initialProducts)
+  const [importSummary, setImportSummary] = useState<string | null>(null)
 
   const filteredProducts = products.filter((product) =>
     product.name.toLowerCase().includes(search.toLowerCase()) || product.group.toLowerCase().includes(search.toLowerCase()),
@@ -64,10 +70,43 @@ export default function Page() {
     window.setTimeout(() => setToast(false), 2800)
   }
 
-  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+  const normalize = (value: unknown) => String(value ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const firstValue = (row: Record<string, unknown>, names: string[]) => {
+    const key = Object.keys(row).find((candidate) => names.includes(normalize(candidate)))
+    return key ? String(row[key] ?? '').trim() : ''
+  }
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
     setSelectedFile(file.name)
+    const buffer = await file.arrayBuffer()
+    const workbook = XLSX.read(buffer, { type: 'array' })
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[workbook.SheetNames[0]], { defval: '' })
+
+    if (importKind === 'estrutura') {
+      const organized = rows.map((row, index) => {
+        const primary = firstValue(row, ['grupo', 'grupo principal', 'categoria', 'departamento']) || `Grupo ${index + 1}`
+        const subgroup = firstValue(row, ['subgrupo', 'subgrupo principal', 'familia', 'subcategoria'])
+        return { name: primary, code: '—', group: 'Itens principais', subgroup: subgroup || 'Sem subgrupo', ncm: '—', cest: '—', status: 'revisar' }
+      })
+      setProducts(Array.from(new Map(organized.map((item) => [`${item.name}-${item.subgroup}`, item])).values()))
+      setImportSummary(`${organized.length} linhas organizadas: grupos primários viraram itens e subgrupos foram convertidos em grupos.`)
+    } else {
+      const merged = rows.map((row) => ({
+        name: firstValue(row, ['produto', 'descricao', 'descricao do produto', 'item']) || 'Produto sem descrição',
+        code: firstValue(row, ['ean', 'gtin', 'codigo de barras', 'codigo', 'cod barras']) || '—',
+        group: firstValue(row, ['grupo', 'categoria', 'departamento']) || 'Sem grupo',
+        subgroup: firstValue(row, ['subgrupo', 'familia', 'subcategoria']) || 'Sem subgrupo',
+        ncm: firstValue(row, ['ncm', 'ncm fiscal']) || '—',
+        cest: firstValue(row, ['cest', 'sest']) || '—',
+        status: 'validado',
+      }))
+      setProducts(merged)
+      setImportSummary(`${merged.length} produtos importados com código de barras, NCM e CEST/SEST.`)
+    }
+    setToast(true)
+    window.setTimeout(() => setToast(false), 2800)
   }
 
   return (
@@ -100,7 +139,7 @@ export default function Page() {
           </div>
         </div>
       </section>
-      {showUpload && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#13251f]/35 px-4"><div className="w-full max-w-[470px] rounded-2xl bg-white p-6 shadow-2xl"><div className="mb-5 flex items-start justify-between"><div><h2 className="text-lg font-bold text-[#243142]">Importar planilha</h2><p className="mt-1 text-xs text-[#87919d]">Envie um arquivo Excel para começar a organização.</p></div><button aria-label="Fechar" onClick={() => setShowUpload(false)} className="text-[#9aa3ae] hover:text-[#435160]"><X size={18} /></button></div><div className="rounded-xl border-2 border-dashed border-[#b9d6cc] bg-[#f7fcfa] px-6 py-9 text-center"><div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#e4f3ed] text-[#2f806b]"><FileSpreadsheet size={22} /></div><p className="text-sm font-semibold text-[#385348]">Arraste seu arquivo aqui</p><p className="mt-1 text-xs text-[#96a59f]">ou selecione um arquivo .xlsx ou .xls</p><label className="mt-4 inline-flex cursor-pointer rounded-lg bg-[#1c6b5a] px-4 py-2 text-xs font-semibold text-white hover:bg-[#155746]">Selecionar arquivo<input className="sr-only" type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} /></label>{selectedFile && <p className="mt-3 text-xs font-medium text-[#2f806b]">Arquivo selecionado: {selectedFile}</p>}</div><div className="mt-5 flex items-start gap-2 text-[11px] leading-[1.5] text-[#86908e]"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#5f9c8a]" />Seus dados são processados com segurança e os códigos fiscais originais nunca são inventados.</div></div></div>}
+      {showUpload && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#13251f]/35 px-4"><div className="w-full max-w-[470px] rounded-2xl bg-white p-6 shadow-2xl"><div className="mb-5 flex items-start justify-between"><div><h2 className="text-lg font-bold text-[#243142]">Importar planilha</h2><p className="mt-1 text-xs text-[#87919d]">Escolha a etapa e envie sua planilha Excel.</p></div><button aria-label="Fechar" onClick={() => setShowUpload(false)} className="text-[#9aa3ae] hover:text-[#435160]"><X size={18} /></button></div><div className="mb-4 grid grid-cols-2 gap-2"><button onClick={() => setImportKind('estrutura')} className={`rounded-lg border px-3 py-2 text-left text-[11px] font-semibold ${importKind === 'estrutura' ? 'border-[#8fc1b0] bg-[#edf8f3] text-[#236b57]' : 'border-[#e3e7eb] text-[#7f8997]'}`}>1. Estrutura<span className="mt-1 block text-[10px] font-normal opacity-75">Grupos e subgrupos</span></button><button onClick={() => setImportKind('produtos')} className={`rounded-lg border px-3 py-2 text-left text-[11px] font-semibold ${importKind === 'produtos' ? 'border-[#8fc1b0] bg-[#edf8f3] text-[#236b57]' : 'border-[#e3e7eb] text-[#7f8997]'}`}>2. Produtos<span className="mt-1 block text-[10px] font-normal opacity-75">EAN, NCM e CEST</span></button></div><div className="rounded-xl border-2 border-dashed border-[#b9d6cc] bg-[#f7fcfa] px-6 py-9 text-center"><div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#e4f3ed] text-[#2f806b]"><FileSpreadsheet size={22} /></div><p className="text-sm font-semibold text-[#385348]">Arraste seu arquivo aqui</p><p className="mt-1 text-xs text-[#96a59f]">ou selecione um arquivo .xlsx ou .xls</p><label className="mt-4 inline-flex cursor-pointer rounded-lg bg-[#1c6b5a] px-4 py-2 text-xs font-semibold text-white hover:bg-[#155746]">Selecionar arquivo<input className="sr-only" type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} /></label>{selectedFile && <p className="mt-3 text-xs font-medium text-[#2f806b]">Arquivo selecionado: {selectedFile}</p>}</div><div className="mt-5 flex items-start gap-2 text-[11px] leading-[1.5] text-[#86908e]"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#5f9c8a]" />Seus dados são processados com segurança e os códigos fiscais originais nunca são inventados.</div></div></div>}
       {toast && <div role="status" className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-lg bg-[#183d33] px-4 py-3 text-xs font-semibold text-white shadow-xl"><Check size={15} />Exportação preparada com sucesso</div>}
     </main>
   )
